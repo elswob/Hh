@@ -1,0 +1,683 @@
+---
+title: "Hedgehog Paper"
+output: html_document
+---
+
+```{r setup, echo = TRUE}
+
+library(RColorBrewer)
+library(ggplot2)
+library(gplots)
+library(reshape)
+library(ggrepel)
+
+options(scipen = 1)
+
+#create output dir
+outDir="DE_out/"
+dir.create(outDir, showWarnings = FALSE)
+
+setwd('/Users/be15516/projects/Garvan/Hedgehog/DE_data/')
+```
+
+```{r plot, echo = TRUE}
+make_heatmap = function(d){ 
+  #heatmap(as.matrix(log(d), ColSideColor=colors[as.factor(c(1,1,1,2,2,2))]))
+  #pdf('h.pdf')
+  head(d)
+  head(log(d,))
+  heatmap(as.matrix(log(d,)))
+  #dev.off()
+  #heatmap.2(as.matrix(log(norm_counts[de,]+1)), ColSideColor=colors[as.factor(c(1,1,1,2,2,2))])
+}
+```
+
+```{r run, echo = TRUE}
+#created LR with symbol from logFC for each FDR<0.05
+#cat Hh-drug_RUVr_k3_DE_FDR_0.05.tsv | cut -f1,3,5 | tail -n +2 | awk '{if($2>0 || $3<0){print$1"\t"$3}else{print $1"\t-"$3}}' > Hh-drug_RUVr_k3_DE_FDR_0.05.rnk
+
+#cutoff
+cut=1e-20
+
+#epi
+dFile<<-"epi/Hh-drug_RUVr_k3_DE_FDR_0.05.tsv"
+eDE<-read.delim(dFile, header=T, sep="\t")
+eDE = eDE[eDE$FDR<cut,]
+eDE_r=eDE[,2]
+dFile = "epi/Hh-drug_RUVr_k3_DE.tsv"
+e=read.delim(dFile,header=T, sep="\t")
+dim(e)
+head(e)
+
+#str
+dFile<<-"str/Hh-drug_RUVr_k3_DE_FDR_0.05.tsv"
+sDE<-read.delim(dFile, header=T, sep="\t")
+sDE = sDE[sDE$FDR<cut,]
+sDE_r = sDE[,2]
+dFile = "str/Hh-drug_RUVr_k3_DE.tsv"
+s=read.delim(dFile,header=T, sep="\t")
+dim(s)
+head(s)
+
+#wt
+dFile<<-"wt/Hh-drug_RUVr_k3_DE_FDR_0.05.tsv"
+wDE<-read.delim(dFile, header=T, sep="\t")
+wDE = wDE[wDE$FDR<cut,]
+wDE_r=wDE[,2]
+dFile="wt/Hh-drug_RUVr_k3_DE.tsv"
+w=read.delim(dFile, header=T, sep="\t")
+dim(w)
+head(w)
+
+all_DE = unique(unlist(list(sDE_r,eDE_r,wDE_r)))
+length(all_DE)
+
+e_all_DE = e[e[,2] %in% all_DE,]
+dim(e_all_DE)
+
+s_all_DE = s[s[,2] %in% all_DE,]
+dim(s_all_DE)
+
+w_all_DE = w[w[,2] %in% all_DE,]
+dim(w_all_DE)
+
+#row.names(e) %in% all_DE
+
+m = merge(e_all_DE[,c(1,3)],s_all_DE[,c(1,3)],by.x=1,by.y=1,all=TRUE)
+m = merge(m,w_all_DE[,c(1,3)],by.x=1,by.y=1,all=TRUE)
+#replace NA with 0
+m[is.na(m)] <- 0
+m[m$V1=='Gli1',]
+
+colnames(m) = c('Gene','Epi','Str','WT')
+
+dim(m)
+head(as.matrix(m[,2:4]))
+
+pdf('h.pdf')
+heatmap.2(as.matrix(m[,2:4]),labRow=m[,1],cexRow=0.3)
+dev.off()
+#make_heatmap(m)
+
+#m <- matrix(rnorm(9), nrow = 3, ncol = 3)
+#plot_ly(z = as.matrix(m[,2:4], x=m[,1]),type = "heatmap")
+```
+
+```{r heatmap_reps_ggplot}
+#need to facet the plots - https://www.r-bloggers.com/making-faceted-heatmaps-with-ggplot2/
+#m$gene=rownames(m)
+facet_heatmap = function(d,name){
+  m.m=melt(s_DE_z,id=c('GSEA','Genes'))
+  p=ggplot(m.m, aes(variable, Genes)) + geom_tile(aes(fill = value), colour = "white") +          #scale_fill_gradient2(low = "#05d7fc", mid="black", high = "#AB282E")
+#scale_fill_gradient2(low = "blue", mid="white", high = "red")
+  scale_fill_gradient(low = "white", high = "red")
+  #order labels
+  p = p + facet_grid(GSEA~.,scales="free_y",space="free") 
+  #angle x-axis labels
+  p = p + theme(axis.text.x = element_text(angle = 45, hjust = 1), axis.text.y=element_text(size=5))
+  #remove grey boxes
+  p = p + theme(strip.background = element_blank(),strip.text.y = element_blank())
+  print(p)
+  pdf(name)
+  print(p)
+  dev.off()
+}
+```
+
+```{r stromal_heatmap, eval=F}
+s_Hh_ctl_file="/Users/be15516/projects/Garvan/Hedgehog/Stromal/RUV/RUVr/Hh-control_RUVr_normalised_counts.tsv"
+s_Hh_ctl=read.delim(s_Hh_ctl_file,header=T,sep="\t")
+s_Hh_drug_file="/Users/be15516/projects/Garvan/Hedgehog/Stromal/RUV/RUVr/Hh-drug_RUVr_normalised_counts.tsv"
+s_Hh_drug=read.delim(s_Hh_drug_file,header=T,sep="\t")
+
+s_Hh_ctl_test=head(s_Hh_ctl)
+s_Hh_drug_test=head(s_Hh_drug)
+
+s=cbind(s_Hh_ctl,s_Hh_drug[,2:6])
+colnames(s)[1] = "ens_id"
+s$ens_id=sub("\\.[0-9]+$","",s$ens_id)
+
+#remove totals at bottom
+s=subset(s, grepl("ENSMUSG", ens_id))
+
+#convert to cpm
+s[,2:ncol(s)] = cpm(s[,2:ncol(s)])
+
+head(s)
+
+gsea1=c('ENSMUSG00000021466',
+'ENSMUSG00000028681',
+'ENSMUSG00000025407',
+'ENSMUSG00000048402',
+'ENSMUSG00000064325',
+'ENSMUSG00000030170',
+'ENSMUSG00000052957')
+
+gsea2=c('ENSMUSG00000027966',
+'ENSMUSG00000026147',
+'ENSMUSG00000022483',
+'ENSMUSG00000031502',
+'ENSMUSG00000026043',
+'ENSMUSG00000053399',
+'ENSMUSG00000070469',
+'ENSMUSG00000043635',
+'ENSMUSG00000043613',
+'ENSMUSG00000049723',
+'ENSMUSG00000050578',
+'ENSMUSG00000031790',
+'ENSMUSG00000028600',
+'ENSMUSG00000017493',
+'ENSMUSG00000033544',
+'ENSMUSG00000004891',
+'ENSMUSG00000034488',
+'ENSMUSG00000021702',
+'ENSMUSG00000006369',
+'ENSMUSG00000015647',
+'ENSMUSG00000051048',
+'ENSMUSG00000037035',
+'ENSMUSG00000062991',
+'ENSMUSG00000024593',
+'ENSMUSG00000026700',
+'ENSMUSG00000053475',
+'ENSMUSG00000031548',
+'ENSMUSG00000030170',
+'ENSMUSG00000019880',
+'ENSMUSG00000027996',
+'ENSMUSG00000021319',
+'ENSMUSG00000027656',
+'ENSMUSG00000064325',
+'ENSMUSG00000029337',
+'ENSMUSG00000054252',
+'ENSMUSG00000030849',
+'ENSMUSG00000020218',
+'ENSMUSG00000042254',
+'ENSMUSG00000055632')
+
+gsea3=c('ENSMUSG00000025789',
+'ENSMUSG00000019880',
+'ENSMUSG00000017493',
+'ENSMUSG00000053475',
+'ENSMUSG00000021702',
+'ENSMUSG00000015647',
+'ENSMUSG00000006369',
+'ENSMUSG00000042254',
+'ENSMUSG00000027656',
+'ENSMUSG00000034488',
+'ENSMUSG00000055632')
+
+gsea4=c('ENSMUSG00000027966',
+'ENSMUSG00000026147',
+'ENSMUSG00000022483',
+'ENSMUSG00000031502',
+'ENSMUSG00000026043',
+'ENSMUSG00000043613',
+'ENSMUSG00000050578',
+'ENSMUSG00000031790',
+'ENSMUSG00000043635')
+
+gsea5=c('ENSMUSG00000029337',
+'ENSMUSG00000031548',
+'ENSMUSG00000004296',
+'ENSMUSG00000037035',
+'ENSMUSG00000064325',
+'ENSMUSG00000027996',
+'ENSMUSG00000021319',
+'ENSMUSG00000030170',
+'ENSMUSG00000062991',
+'ENSMUSG00000029417',
+'ENSMUSG00000033544',
+'ENSMUSG00000026700',
+'ENSMUSG00000024593',
+'ENSMUSG00000020218')
+
+gsea6=c('ENSMUSG00000070473',
+'ENSMUSG00000018569',
+'ENSMUSG00000022512',
+'ENSMUSG00000024304',
+'ENSMUSG00000025321',
+'ENSMUSG00000031962',
+'ENSMUSG00000040037',
+'ENSMUSG00000026442')
+
+gsea7=c('ENSMUSG00000031548',
+'ENSMUSG00000022483',
+'ENSMUSG00000030170',
+'ENSMUSG00000049723',
+'ENSMUSG00000022206',
+'ENSMUSG00000050295',
+'ENSMUSG00000029755',
+'ENSMUSG00000068748',
+'ENSMUSG00000000567',
+'ENSMUSG00000041782',
+'ENSMUSG00000004891',
+'ENSMUSG00000044393',
+'ENSMUSG00000024039',
+'ENSMUSG00000044217',
+'ENSMUSG00000059430',
+'ENSMUSG00000026413',
+'ENSMUSG00000055373',
+'ENSMUSG00000022512',
+'ENSMUSG00000037725',
+'ENSMUSG00000017716',
+'ENSMUSG00000024304',
+'ENSMUSG00000025321',
+'ENSMUSG00000039238',
+'ENSMUSG00000045045',
+'ENSMUSG00000020218',
+'ENSMUSG00000046159')
+
+gsea8=c('ENSMUSG00000027996',
+'ENSMUSG00000006369',
+'ENSMUSG00000026043',
+'ENSMUSG00000027656',
+'ENSMUSG00000031790',
+'ENSMUSG00000022206',
+'ENSMUSG00000029093',
+'ENSMUSG00000030849',
+'ENSMUSG00000004891',
+'ENSMUSG00000028766',
+'ENSMUSG00000051855',
+'ENSMUSG00000021359',
+'ENSMUSG00000015468',
+'ENSMUSG00000022512')
+
+#read a complete file in for ensembl ID to gene names
+dFile = "/Users/be15516/projects/Garvan/Hedgehog/Stromal/Genes/Allcombined_gene_names"
+s_HD=read.delim(dFile,header=T, sep="\t")
+s_HD$ENGS_ID=sub("\\.[0-9]+$","",s_HD$ENGS_ID)
+
+#add gene names 
+s_gene=merge(s,s_HD[,1:2],by.x="ens_id",by.y="ENGS_ID")
+
+#match the genes in each of the GSEA results
+g1=s_gene[s_gene$ens_id %in% gsea1,]
+g1$GSEA=1
+
+g2=s_gene[s_gene$ens_id %in% gsea2,]
+g2$GSEA=2
+
+g3=s_gene[s_gene$ens_id %in% gsea3,]
+g3$GSEA=3
+
+g4=s_gene[s_gene$ens_id %in% gsea4,]
+g4$GSEA=4
+
+g5=s_gene[s_gene$ens_id %in% gsea5,]
+g5$GSEA=5
+
+g6=s_gene[s_gene$ens_id %in% gsea6,]
+g6$GSEA=6
+
+g7=s_gene[s_gene$ens_id %in% gsea7,]
+g7$GSEA=7
+
+g8=s_gene[s_gene$ens_id %in% gsea8,]
+g8$GSEA=8
+
+#s_DE=rbind(g1,g2,g3,g4)
+s_DE=rbind(g5,g6,g7,g8)
+head(s_DE)
+s_DE$ens_id=NULL
+
+#convert to cpm
+s_DE=cpm(s_DE)
+
+#convert to z score
+s_DE_z=s_DE
+s_DE_z[,1:(ncol(s_DE)-2)]=as.data.frame(t(apply(s_DE[,1:(ncol(s_DE)-2)],1,scale)))
+#s_DE_z$GSEA=s_DE$GSEA
+#colnames(s_DE_z)=colnames(s_DE)
+head(s_DE_z)
+
+#cluster
+ord=hclust( dist(s_DE_z[,1:(ncol(s_DE_z)-3)], method = "euclidean"), method = "ward.D" )$order
+s_DE_z$Genes=factor(s_DE_z$Genes, levels=s_DE_z$Genes[ord])
+facet_heatmap(s_DE_z,'str_heatmap_5_8_red_blue.pdf')
+```
+
+```{r epi_heatmap, eval=F}
+s_Hh_ctl_file="/Users/be15516/projects/Garvan/Hedgehog/Epithelial/RUV/RUVr/Hh-control_RUVr_normalised_counts.tsv"
+s_Hh_ctl=read.delim(s_Hh_ctl_file,header=T,sep="\t")
+s_Hh_drug_file="/Users/be15516/projects/Garvan/Hedgehog/Epithelial/RUV/RUVr/Hh-drug_RUVr_normalised_counts.tsv"
+s_Hh_drug=read.delim(s_Hh_drug_file,header=T,sep="\t")
+
+s_Hh_ctl_test=head(s_Hh_ctl)
+s_Hh_drug_test=head(s_Hh_drug)
+
+s=cbind(s_Hh_ctl,s_Hh_drug[,2:6])
+colnames(s)[1] = "ens_id"
+s$ens_id=sub("\\.[0-9]+$","",s$ens_id)
+
+#remove totals at bottom
+s=subset(s, grepl("ENSMUSG", ens_id))
+
+#convert to cpm
+s[,2:ncol(s)] = cpm(s[,2:ncol(s)])
+
+gsea1=c('ENSMUSG00000021508',
+'ENSMUSG00000033420',
+'ENSMUSG00000038608',
+'ENSMUSG00000020810',
+'ENSMUSG00000020427',
+'ENSMUSG00000056427',
+'ENSMUSG00000055653',
+'ENSMUSG00000039899',
+'ENSMUSG00000017493',
+'ENSMUSG00000026586',
+'ENSMUSG00000021268',
+'ENSMUSG00000032011',
+'ENSMUSG00000059430',
+'ENSMUSG00000002265',
+'ENSMUSG00000020077',
+'ENSMUSG00000075284',
+'ENSMUSG00000025810',
+'ENSMUSG00000075254',
+'ENSMUSG00000004791',
+'ENSMUSG00000028626',
+'ENSMUSG00000027386',
+'ENSMUSG00000023046',
+'ENSMUSG00000029168',
+'ENSMUSG00000002985',
+'ENSMUSG00000034295')
+
+gsea2=c('ENSMUSG00000026395'
+'ENSMUSG00000040747',
+'ENSMUSG00000040552',
+'ENSMUSG00000042228',
+'ENSMUSG00000025044',
+'ENSMUSG00000029919',
+'ENSMUSG00000005397',
+'ENSMUSG00000023046',
+'ENSMUSG00000026586',
+'ENSMUSG00000036887',
+'ENSMUSG00000032011',
+'ENSMUSG00000027339',
+'ENSMUSG00000044548')
+
+gsea3=c('ENSMUSG00000021508',
+'ENSMUSG00000033453',
+'ENSMUSG00000040254',
+'ENSMUSG00000066113',
+'ENSMUSG00000027386',
+'ENSMUSG00000019899',
+'ENSMUSG00000036896',
+'ENSMUSG00000005397',
+'ENSMUSG00000023046',
+'ENSMUSG00000056427',
+'ENSMUSG00000055653',
+'ENSMUSG00000023046',
+'ENSMUSG00000017493',
+'ENSMUSG00000020467',
+'ENSMUSG00000020053',
+'ENSMUSG00000036887',
+'ENSMUSG00000025743',
+'ENSMUSG00000034488')
+
+#read a complete file in for ensembl ID to gene names
+dFile = "/Users/be15516/projects/Garvan/Hedgehog/Epithelial/Genes/Allcombined_gene_names"
+s_HD=read.delim(dFile,header=T, sep="\t")
+s_HD$ENGS_ID=sub("\\.[0-9]+$","",s_HD$ENGS_ID)
+
+#add gene names 
+s_gene=merge(s,s_HD[,1:2],by.x="ens_id",by.y="ENGS_ID")
+
+#match the genes in each of the GSEA results
+g1=s_gene[s_gene$ens_id %in% gsea1,]
+g1$GSEA=1
+
+g2=s_gene[s_gene$ens_id %in% gsea2,]
+g2$GSEA=2
+
+g3=s_gene[s_gene$ens_id %in% gsea3,]
+g3$GSEA=3
+
+g4=s_gene[s_gene$ens_id %in% gsea4,]
+g4$GSEA=4
+
+s_DE=rbind(g1,g2,g3)
+head(s_DE)
+s_DE$ens_id=NULL
+
+#convert to z score
+s_DE_z=s_DE
+s_DE_z[,1:(ncol(s_DE)-2)]=as.data.frame(t(apply(s_DE[,1:(ncol(s_DE)-2)],1,scale)))
+#s_DE_z$GSEA=s_DE$GSEA
+#colnames(s_DE_z)=colnames(s_DE)
+head(s_DE_z)
+
+#cluster
+ord=hclust( dist(s_DE_z[,1:(ncol(s_DE_z)-3)], method = "euclidean"), method = "ward.D" )$order
+s_DE_z$Genes=factor(s_DE_z$Genes, levels=s_DE_z$Genes[ord])
+facet_heatmap(s_DE_z,'epi_heatmap_1_3_blue.pdf')
+```
+
+
+```{r volcano}
+
+#http://www.gettinggeneticsdone.com/search?updated-min=2016-01-01T00:00:00-06:00&updated-max=2017-01-01T00:00:00-06:00&max-results=4
+
+# Load packages
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+setwd('/Users/be15516/projects/Garvan/Hedgehog/DE_data/')
+
+dFile = "str/Hh-drug_RUVr_k3_DE.tsv"
+s_HD=read.delim(dFile,header=T, sep="\t")
+dFile = "str/Hh-control_RUVr_k3_DE.tsv"
+s_HC=read.delim(dFile,header=T, sep="\t")
+
+dFile = "epi/Hh-drug_RUVr_k3_DE.tsv"
+e_HD=read.delim(dFile,header=T, sep="\t")
+dFile = "epi/Hh-control_RUVr_k3_DE.tsv"
+e_HC=read.delim(dFile,header=T, sep="\t")
+
+dFile = "wt/Hh-drug_RUVr_k3_DE.tsv"
+w_HD=read.delim(dFile,header=T, sep="\t")
+dFile = "wt/Hh-control_RUVr_k3_DE.tsv"
+w_HC=read.delim(dFile,header=T, sep="\t")
+```
+
+```{r run_volcano} 
+options(scipen = -1)
+
+FDR_cutoff=1e-2
+logFC_high=1
+logFC_low=-1
+
+sig_colour = function(x){
+  #print(x)
+  #print(x['FDR'])
+  #print(x['logFC'])
+  if (as.numeric(x['FDR'])<FDR_cutoff && as.numeric(x['logFC'])>logFC_high){
+    c='up'
+  }else if (as.numeric(x['FDR'])<FDR_cutoff && as.numeric(x['logFC'])<logFC_low){
+    c='down'
+  }else{
+    c='none'
+  }
+  #print(c)
+  return(c)
+}
+
+str_genes=c('ENSMUSG00000029337',
+'ENSMUSG00000025789',
+'ENSMUSG00000064325',
+'ENSMUSG00000026147',
+'ENSMUSG00000022483',
+'ENSMUSG00000025407',
+'ENSMUSG00000057722',
+'ENSMUSG00000021466',
+'ENSMUSG00000028681',
+'ENSMUSG00000031962',
+'ENSMUSG00000030351',
+'ENSMUSG00000025321',
+'ENSMUSG00000004891',
+'ENSMUSG00000048402',
+'ENSMUSG00000027966',
+'ENSMUSG00000024304',
+'ENSMUSG00000015647',
+'ENSMUSG00000017493',
+'ENSMUSG00000031502',
+'ENSMUSG00000070469',
+'ENSMUSG00000006369',
+'ENSMUSG00000062991',
+'ENSMUSG00000028600',
+'ENSMUSG00000033544',
+'ENSMUSG00000052957',
+'ENSMUSG00000020218')
+
+wt_genes=c('ENSMUSG00000064325',	
+'ENSMUSG00000045573',	
+'ENSMUSG00000028681',	
+'ENSMUSG00000025789',	
+'ENSMUSG00000055653',	
+'ENSMUSG00000020218',	
+'ENSMUSG00000021943',	
+'ENSMUSG00000028487',	
+'ENSMUSG00000057722',	
+'ENSMUSG00000025270',	
+'ENSMUSG00000047330',	
+'ENSMUSG00000030351',	
+'ENSMUSG00000025407',	
+'ENSMUSG00000021466',	
+'ENSMUSG00000028834',	
+'ENSMUSG00000020067',	
+'ENSMUSG00000026950',	
+'ENSMUSG00000018893',	
+'ENSMUSG00000020061',	
+'ENSMUSG00000031461',	
+'ENSMUSG00000024471',	
+'ENSMUSG00000019787',	
+'ENSMUSG00000008658',	
+'ENSMUSG00000027077',	
+'ENSMUSG00000051747',	
+'ENSMUSG00000031972',	
+'ENSMUSG00000031097',	
+'ENSMUSG00000030399',	
+'ENSMUSG00000067653',	
+'ENSMUSG00000052374',	
+'ENSMUSG00000061723',	
+'ENSMUSG00000026207',	
+'ENSMUSG00000030730',	
+'ENSMUSG00000038670',	
+'ENSMUSG00000042045',	
+'ENSMUSG00000056328',	
+'ENSMUSG00000040287',	
+'ENSMUSG00000030672',	
+'ENSMUSG00000028328',	
+'ENSMUSG00000032648',	
+'ENSMUSG00000040350',	
+'ENSMUSG00000005716',	
+'ENSMUSG00000057003',	
+'ENSMUSG00000061816',	
+'ENSMUSG00000021702')
+
+epi_genes=c('ENSMUSG00000002633',
+'ENSMUSG00000045573',
+'ENSMUSG00000002265',
+'ENSMUSG00000055653',
+'ENSMUSG00000017493',
+'ENSMUSG00000020053',
+'ENSMUSG00000056427',
+'ENSMUSG00000026586',
+'ENSMUSG00000021268',
+'ENSMUSG00000059430',
+'ENSMUSG00000032011',
+'ENSMUSG00000020810',
+'ENSMUSG00000044548',
+'ENSMUSG00000025044',
+'ENSMUSG00000038608',
+'ENSMUSG00000021508',
+'ENSMUSG00000053797',
+'ENSMUSG00000023046',
+'ENSMUSG00000034295',
+'ENSMUSG00000029919',
+'ENSMUSG00000000753',
+'ENSMUSG00000030782',
+'ENSMUSG00000042284',
+'ENSMUSG00000022676',
+'ENSMUSG00000051855',
+'ENSMUSG00000021614',
+'ENSMUSG00000027750')
+
+print(str_genes)
+
+neg<-function(x) -x 
+
+make_volcano = function(results,name,gene_list){ 
+  sig=apply(results,1,sig_colour)
+  print(head(results))
+  #pdf(paste0(name,"_volcano.pdf"))
+  p = ggplot(results, aes(logFC, -log10(FDR))) +
+  #p = ggplot(results, aes(logFC, FDR)) +
+   #theme with white background
+   theme_bw() +
+
+  #eliminates background, gridlines, and chart border
+  theme(
+    plot.background = element_blank()
+   ,panel.grid.major = element_blank()
+   ,panel.grid.minor = element_blank()
+   ,panel.border = element_blank()
+  ) +
+
+  #draws x and y axis line
+  theme(axis.line.x = element_line(color="black", size = 0.5),
+    axis.line.y = element_line(color="black", size = 0.5)) +  
+    geom_point(aes(col=sig),size=2) +
+    scale_colour_manual(values = c("up"="red", "down"="blue", "none"="black")) +
+    theme(legend.position = "none") +
+    #change x-axis to fit centre around zero based on max logFC
+    #xlim(neg(max(results$logFC)),max(results$logFC)) +
+    xlim(-2,6) + 
+    #set to 15
+    #scale_x_continuous(breaks = c(-15,-10,-5,0,5,10,15),limits=c(-15,15)) + 
+    xlab("log2 fold change") + ylab("-log10 FDR") +
+    geom_vline(xintercept = logFC_high, linetype="dotted") + 
+    geom_vline(xintercept = logFC_low, linetype="dotted") + 
+    geom_hline(yintercept = -log10(FDR_cutoff), linetype="dotted")+
+    ggtitle(name)
+  #add sig DE gene names
+  #p+geom_text_repel(data=subset(results, FDR<FDR_cutoff & logFC>logFC_high), aes(label=gene_name))+ggtitle(name)
+  #add specified gene names
+  #p+geom_text_repel(data=subset(results, ens_id %in% gene_list), aes(label=gene_name))+ggtitle(name)
+
+  ggsave(paste0(name,"_volcano.pdf"))
+  print(p)
+  #dev.off()
+}
+
+#make_volcano(s_HD,"Stromal - Hh vs drug",str_genes)
+make_volcano(e_HD,"Epithelial - Hh vs drug",epi_genes)
+#make_volcano(w_HD,"Whole tumour - Hh vs drug",wt_genes)
+
+#make_volcano(s_HC,"Stromal - Hh vs control",str_genes)
+#make_volcano(e_HC,"Epithelial - Hh vs control",epi_genes)
+#make_volcano(w_HC,"Whole tumour - Hh vs control",wt_genes)
+```
+
+```{r WT_Krt6b}
+library(edgeR)
+
+#ensembl ID for Krt6b
+eID='ENSMUSG00000023041.6'
+
+s_Hh_ctl_file="/Users/be15516/projects/Garvan/Hedgehog/Whole_tumour/RUV/RUVr/Hh-control_RUVr_normalised_counts.tsv"
+s_Hh_ctl=read.delim(s_Hh_ctl_file,header=T,sep="\t",row.names = 1)
+s_Hh_drug_file="/Users/be15516/projects/Garvan/Hedgehog/Whole_tumour/RUV/RUVr/Hh-drug_RUVr_normalised_counts.tsv"
+s_Hh_drug=read.delim(s_Hh_drug_file,header=T,sep="\t",row.names = 1)
+
+cpm_Hh_ctl = cpm(s_Hh_ctl)
+cpm_Hh_drug = cpm(s_Hh_drug)
+
+Krt6b_drug=cpm_Hh_drug[eID,0:5]
+Krt6b_ctl=cpm_Hh_ctl[eID,0:5]
+Krt6b_Hh=cpm_Hh_ctl[eID,6:10]
+
+reps=c('rep1','rep2','rep3','rep4','rep5')
+df = data.frame(Krt6b_drug,Krt6b_ctl,Krt6b_Hh)
+row.names(df)=reps
+write.table(df,file='Krt6b_CPM.csv',sep=',',quote = FALSE,row.names=F)
+```

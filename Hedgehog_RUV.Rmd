@@ -1,0 +1,387 @@
+---
+title: "Hedgehog RUV"
+output: html_document
+---
+
+```{r data, echo = TRUE}
+
+library(edgeR)
+library(data.table)
+library(RUVSeq)
+library(RColorBrewer)
+library(gplots)
+library(EDASeq)
+library(stringr)
+library(reshape)
+library(ggplot2)
+
+#create output dir
+outDir="DE_out/"
+dir.create(outDir, showWarnings = FALSE)
+
+epi=function(){
+  setwd("/Users/ben/Work/projects/Hedgehog/de/RUV/epi")
+  dFile<<-"Allcombined_gene_names_renamed_edit"
+}
+str=function(){
+  setwd("/Users/ben/Work/projects/Hedgehog/de/RUV/stromal")
+  dFile<<-"Allcombined_complete_renamed"
+}
+wt=function(){
+  setwd("/Users/ben/Work/projects/Hedgehog/de/RUV/wt")
+  dFile<<-"Allcombined_renamed_edit"
+}
+#epi()
+#str()
+wt()
+
+x<-read.delim(dFile, header=T, sep="\t", row.names=1)
+dim(x)
+
+#filter
+noint<-rownames(x) %in% c("__no_feature","__ambiguous","__too_low_aQual","__not_aligned","__alignment_not_unique")
+x=x[!noint,]
+#filter <- apply(x, 1, function(x) length(x[x>5])>=5)
+#x <- x[filter,] 
+#head(x)
+#dim(x)
+
+#set some colours
+colors <- brewer.pal(3, "Set2")
+
+Gencode<-read.table("/Users/ben/Work/data/gencode/mouse/m2/ensGene_to_geneName.txt",sep='\t',header=T)
+#Gencode<-read.table("/Users/ben/Work/data/gencode/mouse/m3/ensTrans_to_geneName.txt",sep='\t',header=T)
+```
+
+Plotting function
+```{r plot}
+plotter=function(set,set_id,name,Subject){
+  print("Plotting...")
+  pdf(paste(name,"_k",k_val,"_RLE.pdf",sep=""))
+  plotRLE(set_id, outline=FALSE, ylim=c(-4, 4), col=colors[Subject], las=3, main=paste(name," Relative Log Expression", sep=""))
+  dev.off()
+  pdf(paste(name,"_k",k_val,"_PCA.pdf",sep=""))
+  plotPCA(set_id, col=colors[Subject], cex=1.2, main=paste(name," PCA", sep=""))
+  dev.off()
+}
+```
+
+RUV Differential Expression function
+```{r DE}
+ruv_de=function(set,set_id,name,Subject){
+  print("DE analysis...")
+  #can't figure out how to do this additive step logically, so this will do!!!
+  if (k_val == 1){design <- model.matrix(~Subject + W_1, data=pData(set_id))}
+  if (k_val == 2){design <- model.matrix(~Subject + W_1 + W_2, data=pData(set_id))}
+  if (k_val == 3){design <- model.matrix(~Subject + W_1 + W_2 + W_3, data=pData(set_id))}
+  if (k_val == 4){design <- model.matrix(~Subject + W_1 + W_2 + W_3 + W_4, data=pData(set_id))}
+  if (k_val == 5){design <- model.matrix(~Subject + W_1 + W_2 + W_3 + W_4 + W_5, data=pData(set_id))}
+  print(design)
+  y <- DGEList(counts=counts(set), group=Subject)
+  
+  #filter
+  print(dim(y))
+  print("Keeping genes with cpm>1 in at least 5 replicates")
+  keep <- rowSums(cpm(y)>1) >= 5
+  y <- y[keep,]
+  print(dim(y))
+  
+  y <- calcNormFactors(y, method="upperquartile")
+  y <- estimateGLMCommonDisp(y, design)
+  y <- estimateGLMTagwiseDisp(y, design)
+  fit <- glmFit(y, design)
+  lrt <- glmLRT(fit, coef=2)
+  
+  topTags(lrt)
+  top <- topTags(lrt, n=nrow(set))$table
+
+  #plots
+  ## MDS Plot
+  #pdf(paste(name,sub(".txt","",tFile),"_MDS_plot.pdf",sep=""), height=10, width=15)
+  #plotMDS(y, main="edgeR MDS Plot")
+  #dev.off()
+   
+  ## Biological coefficient of variation plot
+  pdf(paste(name,"_k",k_val,"_edgeR_coef.pdf",sep=""), height=10, width=15)
+  plotBCV(y, cex=0.4, main="edgeR: Biological coefficient of variation (BCV) vs abundance")
+  dev.off()  
+  
+  ## ~MA Plot
+  pdf(paste(name,"_k",k_val,"_MA_plot.pdf",sep=""), height=10, width=15)
+  with(top, plot(logCPM, logFC, cex = .2, pch=20, main="edgeR: Fold change vs abundance"))
+  with(subset(top, FDR<0.05), points(logCPM, logFC, pch=20, col="red", cex = .5))
+  abline(h=c(-1,1), col="blue")
+  dev.off()
+
+  #Create a histogram of p-values (raw, not FDR)
+  pdf(paste(name,"_k",k_val,"_pvalues.pdf",sep=""), height=10, width=15)
+  hist(lrt$table$PValue, breaks=seq(0, 1, 0.05))
+  dev.off()
+
+  #add gene symbols  
+  print("DE size before adding gene names")
+  print(dim(top))
+  write.table(top,file=paste(name,"_k",k_val,"_no_names.tsv",sep=""),sep="\t",quote=F,row.names=T)
+  #create ensembl id column
+  top$ens_id<-row.names(top)
+  #use this to add in the gene names
+  #create ensembl id to gene name map
+  top<-merge(top,Gencode,by.x="ens_id",by.y="ens_id")
+  #create empty gene name column at start of data frame
+  top<-cbind(gene_name=0,top)
+  #add gene name data to new column
+  top$gene_name<-top$name
+  #remove old gene name column
+  top$name<-NULL
+  print("DE size after adding gene names")
+  print(dim(top))
+  #edit ensembl IDs
+  top$ens_id<-sub("\\..*$","",top$ens_id)
+  #top$ens_id<-sub("\\.[0-9]$","",top$ens_id)
+  #sort by FDR
+  top<-top[order(top$FDR),]
+  #write to file
+  top_fdr1=top[top$FDR<0.05,]
+  top_fdr2=top[top$FDR<0.01,]
+  #write to file
+  write.table(top_fdr1,file=paste(name,"_k",k_val,"_DE_FDR_0.05.tsv",sep=""),sep="\t",quote=F,row.names=F)
+  write.table(top,file=paste(name,"_k",k_val,"_DE.tsv",sep=""),sep="\t",quote=F,row.names=F)
+  #write.table(dData,file=paste(outDir,sprintf("%s.DE.tsv",sub(".txt","",tFile)),sep=""),sep="\t",quote=F,row.names=F)
+  
+  #add to DE_list
+  DE_list[[ as.character(paste0(name,"_k",k_val)) ]]<<-nrow(top_fdr1)
+  print(DE_list)
+  #print(length(DE_list))
+}
+```
+
+```{r edgeR, echo = TRUE}
+
+run_blocked_edger=function(tFile){
+  print(tFile)
+  d<-read.delim(paste("DE_treatments/",tFile,sep=""),header=T, sep="\t")
+  print(d)
+  
+  #create design
+  Subject <- factor(d$subject)
+  Treat <- factor(d$treatment, levels=levels(d$treatment))
+  design <- model.matrix(~Subject+Treat)
+  design
+  
+  #get counts of samples of interest
+  samples=levels(d$file_name)
+  counts=x[,c(samples)]
+  print(head(counts))
+  
+  y <- DGEList(counts = counts)
+  plotMDS(y, main="edgeR 1 MDS Plot")
+  y <- calcNormFactors(y)
+  y <- estimateGLMCommonDisp(y,design)
+  y <- estimateGLMTrendedDisp(y,design)
+  y <- estimateGLMTagwiseDisp(y,design)
+  
+  ## MDS Plot
+  pdf(paste(outDir,sub(".txt","",tFile),"_MDS_plot.pdf",sep=""), height=10, width=15)
+  #plotMDS(y, main="edgeR MDS Plot")
+  plotPCA(y$counts, col=colors[Subject], cex=1.2, main="un-normalised PCA")
+  dev.off()
+   
+  ## Biological coefficient of variation plot
+  pdf(paste(outDir,sub(".txt","",tFile),"_edgeR_coef.pdf",sep=""), height=10, width=15)
+  plotBCV(y, cex=0.4, main="edgeR: Biological coefficient of variation (BCV) vs abundance")
+  dev.off()
+  
+  fit <- glmFit(y, design)
+  lrt <- glmLRT(fit)
+  topTags(lrt)
+  
+  top<-topTags(lrt, n=nrow(y$counts))$table
+  
+  ## ~MA Plot
+  pdf(paste(outDir,sub(".txt","",tFile),"_MA_plot.pdf",sep=""))
+  with(top, plot(logCPM, logFC, cex = .2, pch=20, main="edgeR: Fold change vs abundance"))
+  with(subset(top, FDR<0.05), points(logCPM, logFC, pch=20, col="red", cex = .5))
+  abline(h=c(-1,1), col="blue")
+  dev.off()
+  
+  #heatmap of normalised counts
+  de <- rownames(top[top$FDR<0.05,])
+  #try(heatmap.2(as.matrix(log(norm_counts[de,]+1)), ColSideColor=colors[as.factor(c(1,1,1,2,2,2))]))
+  #heatmap(log(normCounts[de[1:500],]+1), ColSideColor=colors[group])
+    
+  #add gene symbols  
+  #create ensembl id column
+  top$ens_id<-row.names(top)
+  #use this to add in the gene names
+  #create ensembl id to gene name map
+  top<-merge(top,Gencode,by.x="ens_id",by.y="ens_id")
+  #create empty gene name column at start of data frame
+  top<-cbind(gene_name=0,top)
+  #add gene name data to new column
+  top$gene_name<-top$name
+  #remove old gene name column
+  top$name<-NULL
+  #sort by FDR
+  top<-top[order(top$FDR),]
+  #fix ensembl ids
+  top$ens_id<-sub("\\..*$","",top$ens_id)
+  #write to file
+  top_fdr1=top[top$FDR<0.05,]
+  top_fdr2=top[top$FDR<0.01,]
+  #write to file
+  write.table(top_fdr1,file=paste(outDir,sprintf("%s.DE_FDR_0.05.tsv",sub(".txt","",tFile)),sep=""),sep="\t",quote=F,row.names=F)
+  write.table(top,file=paste(outDir,sprintf("%s.DE.tsv",sub(".txt","",tFile)),sep=""),sep="\t",quote=F,row.names=F)
+  
+  #print counts per million
+  #o <- order(lrt$table$PValue)
+  #cpm(y)[o[1:10],]
+  #write.table(x,file=sprintf("%s.DE_FDR_0.05.tsv",dFile),sep="\t",quote=F,row.names=F)
+  
+  #summary(de <- decideTestsDGE(lrt))
+  
+  #plot log-fold change against log-counts per million with DE genes highlighted
+  #pdf(paste(outDir,sub(".txt","",tFile),"_DE_plot.pdf",sep=""))
+  #detags=rownames(y)[as.logical(de)]
+  #plotSmear(lrt, de.tags=detags)
+  #abline(h=c(-1,1),col="blue")
+  #dev.off()
+  
+  #add to master list
+  #repData[[length(s1)]]=b
+  #a=a[order(rownames(a)),]
+  
+  #LR_list[[sub(".txt","",tFile)]]<<-a[,"LR"]
+  #FDR_list[[sub(".txt","",tFile)]]<<-a[,"FDR"]
+  #print(length(LR_list))
+  #cbind(fit2$coef, out[, c('adj.P.Val','AveExpr','t')], x[, c('ENGS_ID','name','s1',sample1,sample2)] )
+  #cbind(mdf,)
+}
+```
+
+```{r RUV}
+run_ruv=function(tFile){
+  
+  print(paste("Reading ",tFile))
+  
+  #set it up
+  d<-read.delim(paste("DE_treatments/",tFile,sep=""),header=T, sep="\t")
+  dim(d)
+  
+  samples=levels(d$file_name)
+  counts=x[,c(samples)]
+  
+  #Subject <- factor(d$subject)
+  Subject=as.factor(c(1,1,1,1,1,2,2,2,2,2))
+  
+  set <- newSeqExpressionSet(as.matrix(counts), phenoData = data.frame(Subject, row.names=colnames(counts)))
+  
+  write.table(counts(set),file=paste("RUV/",sub(".txt","",tFile),"_raw_counts.tsv",sep=""),sep="\t",quote=F,row.names=T,col.names = NA)
+  
+  #print PCA before normalisation
+  ## MDS Plot
+  pdf(paste("RUV/",sub(".txt","",tFile),"_un-normalised_MDS_plot.pdf",sep=""))
+  #plotMDS(y, main="un-normalised edgeR MDS Plot")
+  plotPCA(set, col=colors[Subject], cex=1.2, main="un-normalised PCA")
+  dev.off()
+  
+  #print RLE before normalisation
+  pdf(paste("RUV/",sub(".txt","",tFile),"_un-normalised_RLE_plot.pdf",sep=""))
+  plotRLE(set, outline=FALSE, ylim=c(-4, 4), col=colors[Subject], las=3, main="Relative Log Expression")
+  dev.off()
+  
+  #RUVg-empircal_control_genes
+  print("Running RUVg...")
+  dir.create(paste("RUV/","k_",k_val,"/RUVg",sep=""),showWarnings = FALSE)
+  design <- model.matrix(~Subject, data=pData(set))
+  y <- DGEList(counts=counts(set), group=Subject)
+  y <- calcNormFactors(y, method="upperquartile")
+  y <- estimateGLMCommonDisp(y, design)
+  y <- estimateGLMTagwiseDisp(y, design)
+  fit <- glmFit(y, design)
+  lrt <- glmLRT(fit, coef=2)
+  top <- topTags(lrt, n=nrow(set))$table
+  #first pass DE results to list
+  top_fdr1=top[top$FDR<0.05,]
+  name=paste("RUV/k_",k_val,"/RUVnull/",sub(".txt","",tFile),"_RUVnull",sep="")
+  DE_list[[ as.character(paste0(name,"_k",k_val)) ]]<<-nrow(top_fdr1)
+  empirical <- rownames(set)[which(!(rownames(set) %in% rownames(top)[1:5000]))]
+  set2 <- RUVg(set, empirical, k=k_val)
+  pData(set2)
+  name=paste("RUV/k_",k_val,"/RUVg/",sub(".txt","",tFile),"_RUVg",sep="")
+  plotter(set,set2,name,Subject)
+  ruv_de(set,set2,name,Subject)
+  write.table(normCounts(set2),file=paste0(name,"_normalised_counts.tsv"),sep="\t",quote=F,row.names=T,col.names = NA)
+  
+  #RUVs-replicates
+#   print("Running RUVs...")
+#   dir.create(paste("RUV/","k_",k_val,"/RUVs",sep=""),showWarnings = FALSE)
+#   differences <-  matrix(data=c(1:3, 4:6), byrow=TRUE, nrow=2)
+#   set3 <- RUVs(set, rownames(counts), k=k_val, differences)
+#   pData(set3)
+#   name=paste("RUV/k_",k_val,"/RUVs/",sub(".txt","",tFile),"_RUVs",sep="")
+#   plotter(set3,name,Subject)
+#   ruv_de(set3,name,Subject)
+#   write.table(normCounts(set3),file=paste0(name,"_normalised_counts.tsv"),sep="\t",quote=F,row.names=T,col.names = NA)
+
+  #RUVr-residuals
+  print("Running RUVr...")
+  dir.create(paste("RUV/","k_",k_val,"/RUVr",sep=""),showWarnings = FALSE)
+  design <- model.matrix(~Subject, data=pData(set))
+  y <- DGEList(counts=counts(set), group=Subject)
+  y <- calcNormFactors(y, method="upperquartile")
+  y <- estimateGLMCommonDisp(y, design)
+  y <- estimateGLMTagwiseDisp(y, design)
+  fit <- glmFit(y, design)
+  res <- residuals(fit, type="deviance")
+  set4 <- RUVr(set, rownames(counts), k=k_val, res)
+  pData(set4)
+  name=paste("RUV/k_",k_val,"/RUVr/",sub(".txt","",tFile),"_RUVr",sep="")
+  plotter(set,set4,name,Subject)
+  ruv_de(set,set4,name,Subject)
+  write.table(normCounts(set4),file=paste0(name,"_normalised_counts.tsv"),sep="\t",quote=F,row.names=T,col.names = NA)
+}
+```
+
+```{r run}
+#read data description file
+tFiles=c("Hh-drug.txt","Hh-control.txt","drug-control.txt")
+
+#run edger blocking
+#lapply(tFiles, function(x) run_blocked_edger(x))
+
+#run RUV
+dir.create("RUV",showWarnings = FALSE)
+
+#create list for DE data
+DE_list=list()
+
+#set range for RUV k
+k=1:5
+for (i in k){
+  cat("Running RUV with k ",i,"\n")
+  k_val<<-i
+  dir.create(paste("RUV/","k_",i,sep=""),showWarnings = FALSE)
+  lapply(tFiles, function(x) run_ruv(x))
+}
+```
+
+```{r DE_plot}
+#convert list to df
+m=melt(DE_list,value.name="DE")
+#add k column
+m$k=str_match(m$L1,"(k[0-9])")[,1]
+#add comp column
+#m$comp=str_match(m$L1,"Hh_(.*?)_")[,2]
+m$comp=str_match(m$L1,"[r|g|l]\\/(.*?-.*?)_")[,2]
+#add RUV type
+m$ruv=str_match(m$L1,"(RUV[a-z])")[,1]
+
+#plot
+pdf("RUV/DE_combined.pdf")
+#no numbers
+#p=ggplot(data=m, aes(x=k, y=DE, group = interaction(comp,ruv), colour = ruv)) +geom_line(aes(linetype=comp)) + geom_point( size=4, shape=21, fill="white")
+#with numbers
+p=ggplot(data=m, aes(x=k, y=value, group = interaction(comp,ruv), colour = ruv)) +geom_line(aes(linetype=comp)) + geom_point( size=4, shape=21, fill="white") +geom_text(aes(label=value),hjust=0.5, vjust=-1.2, cex=2.5)
+print(p)
+dev.off()
+```
